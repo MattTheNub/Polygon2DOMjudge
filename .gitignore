@@ -166,3 +166,5 @@ tmp/*
 /test/test_output
 
 _version.py
+
+domjudge-packages/

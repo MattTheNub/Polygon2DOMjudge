@@ -7,6 +7,8 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath
 
+from contest_times import contest_duration, eastern_time
+
 
 COLORS = (
     ("#4E79A7", "blue"),
@@ -41,7 +43,19 @@ def main() -> int:
     if problems is None:
         raise SystemExit("contest.xml does not contain a <problems> section")
 
-    start_time = os.environ.get("CONTEST_START_TIME", "2026-04-27T14:17:00-04:00")
+    try:
+        start = eastern_time(os.environ["CONTEST_START_TIME"], "CONTEST_START_TIME") if "CONTEST_START_TIME" in os.environ else None
+        end = eastern_time(os.environ["CONTEST_END_TIME"], "CONTEST_END_TIME") if "CONTEST_END_TIME" in os.environ else None
+        if (start is None) != (end is None):
+            raise ValueError("CONTEST_START_TIME and CONTEST_END_TIME must be set together")
+        duration = contest_duration(start, end) if start and end else None
+        activate = (
+            eastern_time(os.environ["CONTEST_ACTIVATE_TIME"], "CONTEST_ACTIVATE_TIME")
+            if "CONTEST_ACTIVATE_TIME" in os.environ
+            else start
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     formal_name = english_name(contest_root, Path(contest_zip_name).stem)
     rows: list[tuple[str, str, str]] = []
     problem_entries: list[tuple[str, str, str, str, str]] = []
@@ -66,7 +80,16 @@ def main() -> int:
     contest_id = os.environ.get("CONTEST_ID")
     if not contest_id:
         raise SystemExit("CONTEST_ID is required")
-    write_contest_yaml(contest_yaml, contest_id, formal_name, start_time, problem_entries)
+    write_contest_yaml(
+        contest_yaml,
+        contest_id,
+        formal_name,
+        start.isoformat() if start else None,
+        end.isoformat() if end else None,
+        os.environ.get("CONTEST_DURATION") or duration,
+        activate.isoformat() if activate else None,
+        problem_entries,
+    )
     for row in rows:
         print("\t".join(row))
     return 0
@@ -76,24 +99,31 @@ def write_contest_yaml(
     path: Path,
     contest_id: str,
     formal_name: str,
-    start_time: str,
+    start_time: str | None,
+    end_time: str | None,
+    duration: str | None,
+    activate_time: str | None,
     problems: list[tuple[str, str, str, str, str]],
 ) -> None:
     lines = [
         f"id: {scalar(contest_id)}",
         f"formal_name: {scalar(formal_name)}",
         f"name: {scalar(os.environ.get('CONTEST_NAME') or formal_name)}",
-        f"start_time: {scalar(start_time)}",
-        f"end_time: {scalar(os.environ.get('CONTEST_END_TIME', '2067-04-27T14:17:00-04:00'))}",
-        f"duration: {scalar(os.environ.get('CONTEST_DURATION', '359400:00:00.000'))}",
         f"penalty_time: {int(os.environ.get('CONTEST_PENALTY_TIME', '20'))}",
-        f"activate_time: {scalar(os.environ.get('CONTEST_ACTIVATE_TIME', start_time))}",
         "medals:",
         f"    gold: {int(os.environ.get('CONTEST_GOLD', '4'))}",
         f"    silver: {int(os.environ.get('CONTEST_SILVER', '4'))}",
         f"    bronze: {int(os.environ.get('CONTEST_BRONZE', '4'))}",
         "problems:",
     ]
+
+    schedule = [
+        ("start_time", start_time),
+        ("end_time", end_time),
+        ("duration", duration),
+        ("activate_time", activate_time),
+    ]
+    lines[3:3] = [f"{key}: {scalar(value)}" for key, value in schedule if value is not None]
 
     for problem_id, label, name, color_name, rgb in problems:
         lines.extend(

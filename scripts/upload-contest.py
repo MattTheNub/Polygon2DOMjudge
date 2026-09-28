@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from contest_times import contest_duration, eastern_time
+
 
 class UploadError(Exception):
     def __init__(self, status: int, body: str) -> None:
@@ -41,6 +43,18 @@ def main() -> int:
     if args.update and exists(f"{api_url}/contests/{contest_id}", auth, context, args.dry_run):
         print("  contest already exists; leaving contest metadata unchanged")
     else:
+        try:
+            start = eastern_time(contest.get("start_time"), "start_time")
+            end = eastern_time(contest.get("end_time"), "end_time")
+            duration = contest_duration(start, end)
+            contest["start_time"] = start.isoformat()
+            contest["end_time"] = end.isoformat()
+            if "activate_time" in contest:
+                contest["activate_time"] = eastern_time(contest["activate_time"], "activate_time").isoformat()
+            if not contest.get("duration"):
+                contest["duration"] = duration
+        except ValueError as exc:
+            raise SystemExit(f"cannot create contest {contest_id}: {exc}") from exc
         try:
             post_yaml(
                 api_url,

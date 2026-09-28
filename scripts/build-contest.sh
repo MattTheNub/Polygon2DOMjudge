@@ -20,7 +20,9 @@ Environment:
   DOMJUDGE_GXX_IMAGE Docker image used to compile Polygon C++ generators and
             solutions. Defaults to domjudge/judgehost:9.0.0.
   CONTEST_ID Required contest.yaml id.
-  CONTEST_*  Optional contest.yaml overrides.
+  CONTEST_START_TIME, CONTEST_END_TIME Required together for a new contest.
+            Use America/New_York local times; DST offsets are set automatically.
+  CONTEST_*  Other optional contest.yaml overrides.
 EOF
 }
 

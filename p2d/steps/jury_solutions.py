@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from p2d.utils import ensure_dir, get_normalized_lang
@@ -55,9 +56,83 @@ def add_jury_solutions(ctx: ProcessingContext) -> None:
         if (source := solution.find("source[@path][@type]")) is not None:
             ensure_dir(target_dir)
             src = ctx.package_dir / source.attrib["path"]
-            dst = target_dir / src.name
+            dst = _solution_destination(src, target_dir)
             lang = source.attrib["type"]
             _add_solutions_with_expected_result(ctx, src, dst, lang, results)
+
+
+def _solution_destination(src: Path, target_dir: Path) -> Path:
+    """Keep Java solutions separate so public types can share the same name."""
+    if src.suffix.lower() != ".java":
+        return target_dir / src.name
+
+    content = src.read_text(encoding="utf-8", errors="replace")
+    filename = f"{public_type}.java" if (public_type := _java_public_type(content)) else src.name
+
+    directory = target_dir / src.stem
+    suffix = 2
+    while directory.exists():
+        directory = target_dir / f"{src.stem}-{suffix}"
+        suffix += 1
+    ensure_dir(directory)
+    return directory / filename
+
+
+def _java_public_type(source: str) -> str | None:
+    """Find the public top-level type in a single-file Java solution."""
+    depth = 0
+    after_public = False
+    after_type = False
+    for token in _java_tokens(source):
+        if token == "{":
+            depth += 1
+            after_public = after_type = False
+        elif token == "}":
+            depth -= 1
+            after_public = after_type = False
+        elif depth == 0:
+            if after_type:
+                return token
+            if token == "public":
+                after_public = True
+            elif after_public and token in {"abstract", "final", "sealed", "strictfp"}:
+                continue
+            elif after_public and token in {"class", "interface", "enum", "record"}:
+                after_type = True
+            else:
+                after_public = False
+    return None
+
+
+def _java_tokens(source: str) -> Iterator[str]:
+    """Yield Java identifiers and structural tokens outside comments and literals."""
+    index = 0
+    while index < len(source):
+        if source.startswith("//", index):
+            end = source.find("\n", index + 2)
+            index = len(source) if end < 0 else end + 1
+        elif source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            index = len(source) if end < 0 else end + 2
+        elif source.startswith('"""', index):
+            end = source.find('"""', index + 3)
+            index = len(source) if end < 0 else end + 3
+        elif source[index] in {"\"", "'"}:
+            quote = source[index]
+            index += 1
+            while index < len(source) and source[index] != quote:
+                index += 2 if source[index] == "\\" else 1
+            index += 1
+        elif source[index].isalpha() or source[index] in {"_", "$"}:
+            start = index
+            index += 1
+            while index < len(source) and (source[index].isalnum() or source[index] in {"_", "$"}):
+                index += 1
+            yield source[start:index]
+        else:
+            if source[index] in {"{", "}", ";"}:
+                yield source[index]
+            index += 1
 
 
 def _add_solutions_with_expected_result(

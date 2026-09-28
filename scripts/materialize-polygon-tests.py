@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+
+GXX_IMAGE = os.environ.get("DOMJUDGE_GXX_IMAGE", "domjudge/judgehost:9.0.0")
 
 
 def main() -> int:
@@ -89,12 +93,33 @@ def command_for_source(problem_dir: Path, build_dir: Path, source: Path, tools: 
         return tools[key]
 
     if source.suffix == ".cpp":
-        if shutil.which("g++") is None:
-            raise SystemExit("g++ is required to build Polygon C++ generators and solutions")
+        if shutil.which("docker") is None:
+            raise SystemExit("Docker is required to build Polygon C++ generators and solutions")
         build_dir.mkdir(exist_ok=True)
         binary = build_dir / source.stem
         subprocess.run(
-            ["g++", "-std=gnu++23", "-O2", "-pipe", str(source_path), "-o", str(binary)],
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
+                "--volume",
+                f"{problem_dir.resolve()}:/work",
+                "--workdir",
+                "/work",
+                "--entrypoint",
+                "g++",
+                GXX_IMAGE,
+                "-std=gnu++23",
+                "-O2",
+                "-pipe",
+                str(Path("/work") / source),
+                "-o",
+                str(Path("/work/.p2d-build") / source.stem),
+            ],
             check=True,
         )
         tools[key] = [str(binary)]

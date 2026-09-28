@@ -17,6 +17,8 @@ Environment:
   P2D_CMD   Command used to run the converter. Defaults to "uv run p2d" when
             uv and pyproject.toml are present, otherwise "p2d".
   CONTEST_JOBS Number of problems to build concurrently. Defaults to CPU count.
+  DOMJUDGE_GXX_IMAGE Docker image used to compile Polygon C++ generators and
+            solutions. Defaults to domjudge/judgehost:9.0.0.
   CONTEST_ID Required contest.yaml id.
   CONTEST_*  Optional contest.yaml overrides.
 EOF

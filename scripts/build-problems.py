@@ -83,7 +83,18 @@ def main() -> int:
     results: list[Result] = []
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futures = [
-            pool.submit(build_problem, problem, problems_dir, staged_zip, final_zip, materialize_script, p2d_cmd, p2d_args, log_file, cache_key)
+            pool.submit(
+                build_problem,
+                problem,
+                problems_dir,
+                staged_zip,
+                final_zip,
+                materialize_script,
+                p2d_cmd,
+                p2d_args,
+                log_file,
+                cache_key,
+            )
             for problem, staged_zip, final_zip, log_file, cache_key in plans
         ]
         for future in as_completed(futures):
@@ -234,6 +245,7 @@ def problem_cache_key(
     update_text(digest, problem.color)
     update_text(digest, shlex.join(p2d_cmd))
     update_text(digest, shlex.join(p2d_args))
+    update_text(digest, os.environ.get("DOMJUDGE_GXX_IMAGE", "domjudge/judgehost:9.0.0"))
     update_file(digest, materialize_script)
     update_tree(digest, problem_dir)
 

@@ -7,6 +7,11 @@ CONTEST_ID="contestid" ./scripts/build-contest.sh contest-zip-file.zip
 ```
 
 This outputs all the problem packages and contest data in domjudge-packages/
+Polygon C++ generators and solutions are compiled with G++ from
+`domjudge/judgehost:9.0.0` (G++ 13.3.0), so Docker must be available when building
+packages that need this step. Set `DOMJUDGE_GXX_IMAGE` to match a different
+judgehost image if your DOMjudge version changes. The `domserver` image does not
+include G++.
 
 ## Contest upload script usage
 

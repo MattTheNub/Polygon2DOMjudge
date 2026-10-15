@@ -18,6 +18,9 @@ import yaml
 from contest_times import contest_duration, eastern_time
 
 
+DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
+
 class UploadError(Exception):
     def __init__(self, status: int, body: str) -> None:
         super().__init__(f"HTTP {status}: {body.strip()}")
@@ -40,7 +43,9 @@ def main() -> int:
         raise SystemExit(f"{contest_yaml} does not contain any problems")
 
     print(f"Uploading contest {contest_id} from {package_dir}")
-    if args.update and exists(f"{api_url}/contests/{contest_id}", auth, context, args.dry_run):
+    if args.update and exists(
+        f"{api_url}/contests/{contest_id}?onlyActive=false", auth, context, args.dry_run, args.user_agent
+    ):
         print("  contest already exists; leaving contest metadata unchanged")
     else:
         try:
@@ -65,17 +70,18 @@ def main() -> int:
                 auth,
                 context,
                 args.dry_run,
+                args.user_agent,
             )
         except UploadError as exc:
             if not args.update:
                 raise UploadError(exc.status, f"{exc.body}\nContest exists? Re-run with --update.") from exc
             raise
 
-    existing = existing_problems(api_url, contest_id, problems, auth, context, args.dry_run)
+    existing = existing_problems(api_url, contest_id, problems, auth, context, args.dry_run, args.user_agent)
     metadata_problems = [problem for problem in problems if str(problem["id"]) not in existing]
     if metadata_problems:
         print(f"Uploading {len(metadata_problems)} problem metadata entries")
-        upload_problem_metadata(api_url, contest_id, metadata_problems, auth, context, args.dry_run)
+        upload_problem_metadata(api_url, contest_id, metadata_problems, auth, context, args.dry_run, args.user_agent)
     else:
         print("All problem metadata entries already exist; skipping metadata upload")
 
@@ -99,6 +105,7 @@ def main() -> int:
             context=context,
             dry_run=args.dry_run,
             label=f"{label} package",
+            user_agent=args.user_agent,
         )
 
     print("Upload complete.")
@@ -115,6 +122,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--user", default=os.environ.get("DOMJUDGE_USER"), help="DOMjudge API username")
     parser.add_argument("--password", default=os.environ.get("DOMJUDGE_PASSWORD"), help="DOMjudge API password")
+    parser.add_argument(
+        "--user-agent",
+        default=os.environ.get("DOMJUDGE_USER_AGENT") or DEFAULT_USER_AGENT,
+        help="HTTP User-Agent (default: browser-style; env: DOMJUDGE_USER_AGENT)",
+    )
     parser.add_argument("--update", action="store_true", help="update existing contest problem packages")
     parser.add_argument("--dry-run", action="store_true", help="print API calls without uploading")
     parser.add_argument("--insecure", action="store_true", help="disable TLS certificate verification")
@@ -128,14 +140,27 @@ def upload_problem_metadata(
     auth: str | None,
     context: ssl.SSLContext | None,
     dry_run: bool,
+    user_agent: str = DEFAULT_USER_AGENT,
 ) -> None:
     content = yaml.safe_dump(problems, sort_keys=False)
     try:
-        post_yaml(api_url, f"contests/{contest_id}/problems/add-data", "data", "problems.yaml", content, auth, context, dry_run)
+        post_yaml(
+            api_url,
+            f"contests/{contest_id}/problems/add-data",
+            "data",
+            "problems.yaml",
+            content,
+            auth,
+            context,
+            dry_run,
+            user_agent,
+        )
     except UploadError as exc:
         if exc.status not in {404, 405}:
             raise
-        post_yaml(api_url, f"contests/{contest_id}/problems", "data", "problems.yaml", content, auth, context, dry_run)
+        post_yaml(
+            api_url, f"contests/{contest_id}/problems", "data", "problems.yaml", content, auth, context, dry_run, user_agent
+        )
 
 
 def existing_problems(
@@ -145,6 +170,7 @@ def existing_problems(
     auth: str | None,
     context: ssl.SSLContext | None,
     dry_run: bool,
+    user_agent: str = DEFAULT_USER_AGENT,
 ) -> set[str]:
     if dry_run:
         return set()
@@ -152,7 +178,7 @@ def existing_problems(
     existing = set()
     for problem in problems:
         problem_id = str(problem["id"])
-        if exists(f"{api_url}/contests/{contest_id}/problems/{problem_id}", auth, context, dry_run):
+        if exists(f"{api_url}/contests/{contest_id}/problems/{problem_id}", auth, context, dry_run, user_agent):
             existing.add(problem_id)
     return existing
 
@@ -166,6 +192,7 @@ def post_yaml(
     auth: str | None,
     context: ssl.SSLContext | None,
     dry_run: bool,
+    user_agent: str = DEFAULT_USER_AGENT,
 ) -> None:
     post_multipart(
         f"{api_url}/{path}",
@@ -175,6 +202,7 @@ def post_yaml(
         context=context,
         dry_run=dry_run,
         label=filename,
+        user_agent=user_agent,
     )
 
 
@@ -187,15 +215,15 @@ def post_multipart(
     context: ssl.SSLContext | None,
     dry_run: bool,
     label: str,
+    user_agent: str = DEFAULT_USER_AGENT,
 ) -> None:
     if dry_run:
         print(f"  dry-run POST {url}")
         return
 
     body, content_type = multipart_body(fields, files)
-    headers = {"Content-Type": content_type}
-    if auth:
-        headers["Authorization"] = auth
+    headers = request_headers(auth, user_agent)
+    headers["Content-Type"] = content_type
 
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
@@ -209,15 +237,24 @@ def post_multipart(
     print(f"  OK {label}")
 
 
-def exists(url: str, auth: str | None, context: ssl.SSLContext | None, dry_run: bool) -> bool:
+def request_headers(auth: str | None, user_agent: str) -> dict[str, str]:
+    headers = {"User-Agent": user_agent, "Accept": "application/json, */*;q=0.8"}
+    if auth:
+        headers["Authorization"] = auth
+    return headers
+
+
+def exists(
+    url: str,
+    auth: str | None,
+    context: ssl.SSLContext | None,
+    dry_run: bool,
+    user_agent: str = DEFAULT_USER_AGENT,
+) -> bool:
     if dry_run:
         return False
 
-    headers = {}
-    if auth:
-        headers["Authorization"] = auth
-
-    request = urllib.request.Request(url, headers=headers, method="GET")
+    request = urllib.request.Request(url, headers=request_headers(auth, user_agent), method="GET")
     try:
         with urllib.request.urlopen(request, timeout=30, context=context) as response:
             response.read()
